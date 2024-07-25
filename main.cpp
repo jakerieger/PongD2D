@@ -257,9 +257,10 @@ struct Paddle final : GameObject,
     }
 
     void OnKey(const KeyEvent event) override {
-        if (event.KeyCode == VK_UP) {
+        // TODO: Bug where arrow key and alpha key pressed together double paddle speed
+        if (event.KeyCode == VK_UP || event.KeyCode == 'W') {
             Position.y -= 10.f;
-        } else if (event.KeyCode == VK_DOWN) {
+        } else if (event.KeyCode == VK_DOWN || event.KeyCode == 'S') {
             Position.y += 10.f;
         }
     }
@@ -316,7 +317,7 @@ void Initialize() {
         paddlePlayer->Scale = D2D1::Point2F(16, 100);
 
         const auto paddleOpponent = new Paddle(true);
-        paddleOpponent->Color     = D2D1::ColorF(D2D1::ColorF::White);
+        paddleOpponent->Color     = D2D1::ColorF(0xED64A6);
         paddleOpponent->Position =
           D2D1::Point2F(scast<float>(rc.right) - 100, scast<float>(rc.bottom - rc.top) / 2);
         paddleOpponent->Scale = D2D1::Point2F(16, 100);
@@ -377,7 +378,7 @@ void Update(const double dT) {
 void Frame() {
     if (g_RenderTarget) {
         g_RenderTarget->BeginDraw();
-        g_RenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+        g_RenderTarget->Clear(D2D1::ColorF(0x11121C));
 
         // Draw game stuff here
         for (const auto& go : g_GameObjects | Map::Values) {
