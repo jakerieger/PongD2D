@@ -56,6 +56,12 @@ static void CheckResult(const HRESULT hr) {
     }
 }
 
+static RECT GetWindowRect(HWND hwnd) {
+    RECT rect;
+    ::GetClientRect(hwnd, &rect);
+    return rect;
+}
+
 #define scast static_cast
 #define dcast dynamic_cast
 #define rcast reinterpret_cast
@@ -206,19 +212,14 @@ struct Ball final : GameObject {
     }
 
     void Start() override {
-        RECT windowRect;
-        ::GetClientRect(g_Hwnd, &windowRect);
-        Reset(windowRect);
+        Reset(GetWindowRect(g_Hwnd));
     }
 
     void Update(const double dT) override {
-        RECT windowRect;
-        ::GetClientRect(g_Hwnd, &windowRect);
-
         Move(scast<float>(dT));
         UpdateBoundingBox();
         CheckCollision();
-        CheckOOB(windowRect);
+        CheckOOB(GetWindowRect(g_Hwnd));
     }
 
     void Draw(ID2D1RenderTarget* renderTarget) override {
@@ -440,10 +441,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
             ::PostQuitMessage(0);
             return 0;
         case WM_SIZE: {
-            RECT rc;
-            ::GetClientRect(hwnd, &rc);
-            const auto w = rc.right - rc.left;
-            const auto h = rc.bottom - rc.top;
+            auto [left, top, right, bottom] = GetWindowRect(hwnd);
+            const auto w                    = right - left;
+            const auto h                    = bottom - top;
             OnResize(w, h);
         }
             return 0;
@@ -468,6 +468,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         case WM_RBUTTONUP:
             OnMouseUp(1, 0, 0, 0);
             return 0;
+        default:
+            break;
     }
 
     return ::DefWindowProc(hwnd, uMsg, wParam, lParam);
