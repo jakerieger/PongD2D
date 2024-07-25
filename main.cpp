@@ -11,12 +11,16 @@
 
 #include "res/resource.h"
 
+#include <thread>
+
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 
 static constexpr int kWindowWidth        = 1200;
 static constexpr int kWindowHeight       = 900;
 static constexpr bool kDrawBoundingBoxes = false;
+
+static bool g_IsRunning = false;
 
 namespace Map {
     constexpr auto Values = std::ranges::views::values;
@@ -59,18 +63,46 @@ static void CheckResult(const HRESULT hr) {
 struct GameState {
     int PlayerScore   = 0;
     int OpponentScore = 0;
-    int ElapsedTime   = 0;
+    int ScoreLimit    = 0;
+
+    [[nodiscard]] int TotalScore() const {
+        return PlayerScore + OpponentScore;
+    }
+
+    void Reset(const int scoreLimit) {
+        PlayerScore   = 0;
+        PlayerScore   = 0;
+        OpponentScore = 0;
+        ScoreLimit    = scoreLimit;
+    }
 };
 
-static GameState g_GameState = {};
+struct KeyState {
+    bool Pressed  = false;
+    bool Released = false;
+};
+
+struct KeyEvent {
+    int KeyCode;
+};
+
+struct MouseEvent {
+    int Button;
+};
+
+struct MouseMoveEvent {
+    double X;
+    double Y;
+};
 
 struct InputListener {
     virtual ~InputListener() = default;
-    virtual void OnKeyDown(int keyCode) {}
-    virtual void OnKeyUp(int keyCode) {}
-    virtual void OnMouseMove(int mouseX, int mouseY) {}
-    virtual void OnMouseDown(int mouseX, int mouseY) {}
-    virtual void OnMouseUp(int mouseX, int mouseY) {}
+    virtual void OnKey(KeyEvent event) {}
+    virtual void OnKeyDown(KeyEvent event) {}
+    virtual void OnKeyUp(KeyEvent event) {}
+    virtual void OnMouseMove(MouseMoveEvent event) {}
+    virtual void OnMouseDown(MouseEvent event) {}
+    virtual void OnMouseUp(MouseEvent event) {}
 };
 
 struct GameObject {
@@ -105,12 +137,15 @@ struct GameObject {
     }
 };
 
+static GameState g_GameState = {.ScoreLimit = 10};
 static HWND g_Hwnd;
 static ID2D1Factory* g_Factory;
 static ID2D1HwndRenderTarget* g_RenderTarget;
 static IDWriteFactory* g_DWriteFactory;
 static std::unordered_map<std::string, GameObject*> g_GameObjects;
 static std::vector<InputListener*> g_InputListeners;
+static std::unordered_map<int, KeyState> g_KeyStates;
+std::thread g_InputDispatcherThread;
 
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
@@ -201,13 +236,32 @@ struct Paddle final : GameObject,
         brush->Release();
     }
 
-    void OnKeyDown(int keyCode) override {}
-
-    void OnKeyUp(int keyCode) override {}
+    void OnKey(const KeyEvent event) override {
+        if (event.KeyCode == VK_UP) {
+            Position.y -= 10.f;
+        } else if (event.KeyCode == VK_DOWN) {
+            Position.y += 10.f;
+        }
+    }
 
 private:
     bool m_IsAI;
 };
+
+void InputDispatcher() {
+    while (g_IsRunning) {
+        for (const auto& [key, state] : g_KeyStates) {
+            if (state.Pressed) {
+                const KeyEvent event {key};
+                for (const auto& listener : g_InputListeners) {
+                    listener->OnKey(event);
+                }
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+    }
+}
 
 void Initialize() {
     auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_Factory);
@@ -225,6 +279,8 @@ void Initialize() {
                              __uuidof(IDWriteFactory),
                              rcast<IUnknown**>(&g_DWriteFactory));
     CheckResult(hr);
+
+    g_InputDispatcherThread = std::thread(InputDispatcher);
 
     {  // Initialize the game objects
         const auto ball = new Ball;
@@ -252,6 +308,10 @@ void Initialize() {
     }
 }
 
+void Reset() {
+    g_GameState.Reset(10);
+}
+
 void Shutdown() {
     if (g_RenderTarget) {
         g_RenderTarget->Release();
@@ -262,6 +322,8 @@ void Shutdown() {
         g_Factory->Release();
         g_Factory = nullptr;
     }
+
+    g_InputDispatcherThread.join();
 }
 
 void Start() {
@@ -271,6 +333,22 @@ void Start() {
 }
 
 void Update(const double dT) {
+    if (g_GameState.TotalScore() >= g_GameState.ScoreLimit) {
+        // Game is over, announce winner
+        if (g_GameState.OpponentScore == g_GameState.PlayerScore) {
+            // TIE
+            MessageBoxA(g_Hwnd, "Game ended in a tie!", "Game Over", MB_OK);
+        } else if (g_GameState.OpponentScore > g_GameState.PlayerScore) {
+            // Opponent wins
+            MessageBoxA(g_Hwnd, "You lost.", "Game Over", MB_OK);
+        } else {
+            // Player wins
+            MessageBoxA(g_Hwnd, "You won!", "Game Over", MB_OK);
+        }
+
+        Reset();
+    }
+
     for (const auto& go : g_GameObjects | Map::Values) {
         go->Update(dT);
     }
@@ -300,19 +378,25 @@ void OnResize(const int w, const int h) {
     }
 }
 
-void OnKeyDown(int keyCode) {
+void OnKeyDown(const int keyCode) {
     if (keyCode == VK_ESCAPE) {
         ::PostQuitMessage(0);
     }
 
+    g_KeyStates[keyCode].Pressed  = true;
+    g_KeyStates[keyCode].Released = false;
+
     for (const auto listener : g_InputListeners) {
-        listener->OnKeyDown(keyCode);
+        listener->OnKeyDown({keyCode});
     }
 }
 
-void OnKeyUp(int keyCode) {
+void OnKeyUp(const int keyCode) {
+    g_KeyStates[keyCode].Pressed  = false;
+    g_KeyStates[keyCode].Released = true;
+
     for (const auto listener : g_InputListeners) {
-        listener->OnKeyUp(keyCode);
+        listener->OnKeyUp({keyCode});
     }
 }
 
@@ -421,7 +505,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     Initialize();
 
     // Enter the main loop
-    MSG msg = {};
+    MSG msg     = {};
+    g_IsRunning = true;
     Timer::StartTimer();
     Start();
 
@@ -439,6 +524,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         Frame();
     }
 
+    g_IsRunning = false;
     Shutdown();
 
     return scast<int>(msg.wParam);
