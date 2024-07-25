@@ -24,6 +24,8 @@
 
 #include "res/resource.h"
 
+#include <fstream>
+
 static constexpr bool kDrawBoundingBoxes = false;
 
 static float g_InitBallSpeed = 10.f;
@@ -196,6 +198,11 @@ struct GameObject {
     }
 };
 
+struct WAVFile {
+    WAVEFORMATEX Format;
+    std::vector<BYTE> Data;
+};
+
 static GameState g_GameState = {.ScoreLimit = 10};
 static ID2D1Factory* g_Factory;
 static ID2D1HwndRenderTarget* g_RenderTarget;
@@ -203,6 +210,9 @@ static IDWriteFactory* g_DWriteFactory;
 static std::unordered_map<std::string, GameObject*> g_GameObjects;
 static std::vector<InputListener*> g_InputListeners;
 static std::unordered_map<int, KeyState> g_KeyStates;
+static IXAudio2* g_XAudio2;
+static IXAudio2MasteringVoice* g_MasterVoice;
+
 std::thread g_InputDispatcherThread;
 std::thread g_FixedUpdateThread;
 
@@ -234,6 +244,61 @@ bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
     }
 
     return true;
+}
+
+bool LoadWAVFile(const char* filename, WAVFile& wavFile) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    // Read header
+    file.seekg(0, std::ios::end);
+    size_t fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    BYTE header[44];
+    file.read(reinterpret_cast<char*>(header), 44);
+
+    // Parse header (assuming it's a valid WAV file)
+    wavFile.Format.wFormatTag      = *reinterpret_cast<WORD*>(&header[20]);
+    wavFile.Format.nChannels       = *reinterpret_cast<WORD*>(&header[22]);
+    wavFile.Format.nSamplesPerSec  = *reinterpret_cast<DWORD*>(&header[24]);
+    wavFile.Format.nAvgBytesPerSec = *reinterpret_cast<DWORD*>(&header[28]);
+    wavFile.Format.nBlockAlign     = *reinterpret_cast<WORD*>(&header[32]);
+    wavFile.Format.wBitsPerSample  = *reinterpret_cast<WORD*>(&header[34]);
+    wavFile.Format.cbSize          = 0;
+
+    const size_t dataSize = *reinterpret_cast<DWORD*>(&header[40]);
+    wavFile.Data.resize(dataSize);
+    file.read(reinterpret_cast<char*>(wavFile.Data.data()), SCAST<std::streamsize>(dataSize));
+
+    return true;
+}
+
+void PlayOneShot(const char* wavFile) {
+    WAVFile wav = {};
+    if (!LoadWAVFile(wavFile, wav)) {
+        MessageBoxA(g_Hwnd, "Failed to load wav file", "Runtime Error", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    IXAudio2SourceVoice* pSourceVoice = nullptr;
+
+    auto hr = g_XAudio2->CreateSourceVoice(&pSourceVoice, &wav.Format);
+    CATCH_COM_EXCEPTION;
+
+    // Submit audio buffer
+    XAUDIO2_BUFFER buffer = {0};
+    buffer.AudioBytes     = static_cast<UINT32>(wav.Data.size());
+    buffer.pAudioData     = wav.Data.data();
+    buffer.Flags          = XAUDIO2_END_OF_STREAM;
+
+    hr = pSourceVoice->SubmitSourceBuffer(&buffer);
+    CATCH_COM_EXCEPTION;
+
+    // Start playing
+    hr = pSourceVoice->Start(0);
+    CATCH_COM_EXCEPTION;
 }
 
 /*
@@ -442,6 +507,15 @@ void Initialize() {
     // Load UI font
     {}
 
+    // Initialize XAudio2
+    {
+        hr = XAudio2Create(&g_XAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
+        CATCH_COM_EXCEPTION;
+
+        hr = g_XAudio2->CreateMasteringVoice(&g_MasterVoice);
+        CATCH_COM_EXCEPTION;
+    }
+
     g_InputDispatcherThread = std::thread(InputDispatcher);
     g_FixedUpdateThread     = std::thread(FixedUpdate);
 
@@ -496,6 +570,9 @@ void Shutdown() {
         g_Factory = nullptr;
     }
 
+    g_MasterVoice->DestroyVoice();
+    g_XAudio2->Release();
+
     g_InputDispatcherThread.join();
     g_FixedUpdateThread.join();
 }
@@ -504,6 +581,8 @@ void Start() {
     for (const auto& go : g_GameObjects | Map::Values) {
         go->Start();
     }
+
+    PlayOneShot("assets/bg_music.wav");
 }
 
 void FixedUpdate() {
