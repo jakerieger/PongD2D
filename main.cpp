@@ -649,7 +649,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     Timer::StartTimer();
     Start();
 
+    constexpr int FPS        = 60;
+    constexpr int frameDelay = 1000 / FPS;
+
     for (;;) {
+        auto frameStart = std::chrono::high_resolution_clock::now();
         Update(Timer::GetDeltaTime());
 
         while (::PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -661,6 +665,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             break;
 
         Frame();
+
+        auto frameEnd = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float, std::milli> frameDuration = frameEnd - frameStart;
+        const auto fps                                         = 1000.f / frameDuration.count();
+        const auto fmt = std::format("PongD2D | FPS: {:.2f}", fps);
+        ::SetWindowTextA(g_Hwnd, fmt.c_str());
     }
 
     g_IsRunning = false;
