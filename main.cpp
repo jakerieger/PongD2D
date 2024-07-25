@@ -117,6 +117,8 @@ struct GameObject {
     virtual void Draw(ID2D1RenderTarget* renderTarget) = 0;
     virtual ~GameObject()                              = default;
 
+    virtual void Reset() {}
+
     void UpdateBoundingBox() {
         const auto top    = Position.y - Scale.y;
         const auto bottom = Position.y + Scale.y;
@@ -161,6 +163,8 @@ bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
 
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
+        GameObject::Reset();
+
         if (m_LastToScore == 0) {
             m_Velocity = {kBallSpeed, 0.f};
         } else {
@@ -331,6 +335,9 @@ void Initialize() {
 
 void Reset() {
     g_GameState.Reset(10);
+    for (const auto& go : g_GameObjects | Map::Values) {
+        go->Reset();
+    }
 }
 
 void Shutdown() {
