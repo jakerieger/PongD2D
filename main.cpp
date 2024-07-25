@@ -21,6 +21,7 @@ static constexpr bool kDrawBoundingBoxes = false;
 static constexpr float kBallSpeed        = 500.f;
 
 static bool g_IsRunning = false;
+static HWND g_Hwnd;
 
 namespace Map {
     constexpr auto Values = std::ranges::views::values;
@@ -52,12 +53,7 @@ private:
 static void CheckResult(const HRESULT hr) {
     if (FAILED(hr)) {
         const _com_error err(hr);
-#ifndef NDEBUG
         throw ComError(err.ErrorMessage());
-#else
-        MessageBoxA(g_Hwnd, err.ErrorMessage(), "Windows Error", MB_OK);
-        exit(1);
-#endif
     }
 }
 
@@ -142,8 +138,12 @@ struct GameObject {
 
     void DrawBoundingBox(ID2D1RenderTarget* renderTarget) const {
         ID2D1SolidColorBrush* boundsBrush = nullptr;
-        CheckResult(
-          renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush));
+        try {
+            CheckResult(
+              renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush));
+        } catch (ComError& err) {
+            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+        }
 
         renderTarget->DrawRectangle(BoundingBox, boundsBrush, 1);
         boundsBrush->Release();
@@ -151,7 +151,6 @@ struct GameObject {
 };
 
 static GameState g_GameState = {.ScoreLimit = 10};
-static HWND g_Hwnd;
 static ID2D1Factory* g_Factory;
 static ID2D1HwndRenderTarget* g_RenderTarget;
 static IDWriteFactory* g_DWriteFactory;
@@ -229,7 +228,11 @@ struct Ball final : GameObject {
 
     void Draw(ID2D1RenderTarget* renderTarget) override {
         ID2D1SolidColorBrush* brush = nullptr;
-        CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
+        try {
+            CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
+        } catch (ComError& err) {
+            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+        }
 
         renderTarget->FillEllipse(D2D1::Ellipse(Position, Scale.x, Scale.y), brush);
         brush->Release();
@@ -261,7 +264,11 @@ struct Paddle final : GameObject,
 
     void Draw(ID2D1RenderTarget* renderTarget) override {
         ID2D1SolidColorBrush* brush = nullptr;
-        CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
+        try {
+            CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
+        } catch (ComError& err) {
+            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+        }
         renderTarget->FillRectangle(BoundingBox, brush);
         brush->Release();
     }
@@ -296,7 +303,11 @@ void InputDispatcher() {
 
 void Initialize() {
     auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_Factory);
-    CheckResult(hr);
+    try {
+        CheckResult(hr);
+    } catch (ComError& err) {
+        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+    }
 
     RECT rc;
     GetClientRect(g_Hwnd, &rc);
@@ -304,12 +315,20 @@ void Initialize() {
       D2D1::RenderTargetProperties(),
       D2D1::HwndRenderTargetProperties(g_Hwnd, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top)),
       &g_RenderTarget);
-    CheckResult(hr);
+    try {
+        CheckResult(hr);
+    } catch (ComError& err) {
+        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+    }
 
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
                              __uuidof(IDWriteFactory),
                              rcast<IUnknown**>(&g_DWriteFactory));
-    CheckResult(hr);
+    try {
+        CheckResult(hr);
+    } catch (ComError& err) {
+        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+    }
 
     g_InputDispatcherThread = std::thread(InputDispatcher);
 
@@ -402,13 +421,21 @@ void Frame() {
             }
         }
 
-        CheckResult(g_RenderTarget->EndDraw());
+        try {
+            CheckResult(g_RenderTarget->EndDraw());
+        } catch (ComError& err) {
+            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+        }
     }
 }
 
 void OnResize(const int w, const int h) {
     if (g_RenderTarget) {
-        CheckResult(g_RenderTarget->Resize(D2D1::SizeU(w, h)));
+        try {
+            CheckResult(g_RenderTarget->Resize(D2D1::SizeU(w, h)));
+        } catch (ComError& err) {
+            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
+        }
     }
 }
 
