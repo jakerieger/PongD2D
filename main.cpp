@@ -64,6 +64,15 @@ struct GameState {
 
 static GameState g_GameState = {};
 
+struct InputListener {
+    virtual ~InputListener() = default;
+    virtual void OnKeyDown(int keyCode) {}
+    virtual void OnKeyUp(int keyCode) {}
+    virtual void OnMouseMove(int mouseX, int mouseY) {}
+    virtual void OnMouseDown(int mouseX, int mouseY) {}
+    virtual void OnMouseUp(int mouseX, int mouseY) {}
+};
+
 struct GameObject {
     D2D1_RECT_F BoundingBox = {};
     D2D1_COLOR_F Color      = {};
@@ -101,6 +110,7 @@ static ID2D1Factory* g_Factory;
 static ID2D1HwndRenderTarget* g_RenderTarget;
 static IDWriteFactory* g_DWriteFactory;
 static std::unordered_map<std::string, GameObject*> g_GameObjects;
+static std::vector<InputListener*> g_InputListeners;
 
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
@@ -160,12 +170,31 @@ private:
     D2D1_POINT_2F m_Velocity = {0.f, 0.f};
 };
 
-struct Paddle final : GameObject {
+struct Paddle final : GameObject,
+                      InputListener {
+    explicit Paddle(const bool isAI) : m_IsAI(isAI) {}
+
     void Start() override {}
 
-    void Update(double dT) override {}
+    void MoveAI() {
+        auto ballPosition = g_GameObjects["Ball"]->Position;
+        // Calculate paddle move-to location based on balls velocity and trajectory
+    }
+
+    void Update(double dT) override {
+        if (m_IsAI) {
+            MoveAI();
+        }
+    }
 
     void Draw(ID2D1RenderTarget* renderTarget) override {}
+
+    void OnKeyDown(int keyCode) override {}
+
+    void OnKeyUp(int keyCode) override {}
+
+private:
+    bool m_IsAI;
 };
 
 void Initialize() {
@@ -192,18 +221,19 @@ void Initialize() {
           D2D1::Point2F(scast<float>(rc.right - rc.left) / 2, scast<float>(rc.bottom - rc.top) / 2);
         ball->Scale = D2D1::Point2F(16, 16);
 
-        const auto paddlePlayer = new Paddle;
+        const auto paddlePlayer = new Paddle(false);
         paddlePlayer->Color     = D2D1::ColorF(D2D1::ColorF::White);
         paddlePlayer->Position =
           D2D1::Point2F(scast<float>(rc.left) + 100, scast<float>(rc.bottom - rc.top) / 2);
         paddlePlayer->Scale = D2D1::Point2F(16, 200);
 
-        const auto paddleOpponent = new Paddle;
+        const auto paddleOpponent = new Paddle(true);
         paddleOpponent->Color     = D2D1::ColorF(D2D1::ColorF::White);
         paddleOpponent->Position =
           D2D1::Point2F(scast<float>(rc.right) - 100, scast<float>(rc.bottom - rc.top) / 2);
         paddleOpponent->Scale = D2D1::Point2F(16, 200);
 
+        g_InputListeners.push_back(paddlePlayer);
         g_GameObjects["Player"]   = paddlePlayer;
         g_GameObjects["Opponent"] = paddleOpponent;
         g_GameObjects["Ball"]     = ball;
@@ -262,10 +292,22 @@ void OnKeyDown(int keyCode) {
     if (keyCode == VK_ESCAPE) {
         ::PostQuitMessage(0);
     }
+
+    for (const auto listener : g_InputListeners) {
+        listener->OnKeyDown(keyCode);
+    }
 }
-void OnKeyUp(int keyCode) {}
+
+void OnKeyUp(int keyCode) {
+    for (const auto listener : g_InputListeners) {
+        listener->OnKeyUp(keyCode);
+    }
+}
+
 void OnMouseMove(int x, int y) {}
+
 void OnMouseDown(int button, int state, int x, int y) {}
+
 void OnMouseUp(int button, int state, int x, int y) {}
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
