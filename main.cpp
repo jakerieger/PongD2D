@@ -18,6 +18,7 @@
 static constexpr int kWindowWidth        = 1200;
 static constexpr int kWindowHeight       = 900;
 static constexpr bool kDrawBoundingBoxes = false;
+static constexpr float kBallSpeed        = 500.f;
 
 static bool g_IsRunning = false;
 
@@ -146,12 +147,24 @@ static std::vector<InputListener*> g_InputListeners;
 static std::unordered_map<int, KeyState> g_KeyStates;
 std::thread g_InputDispatcherThread;
 
+bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
+    if (rectA.right <= rectB.left || rectB.right <= rectA.left) {
+        return false;
+    }
+
+    if (rectA.bottom <= rectB.top || rectB.bottom <= rectA.top) {
+        return false;
+    }
+
+    return true;
+}
+
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
         if (m_LastToScore == 0) {
-            m_Velocity = {300.f, 0.f};
+            m_Velocity = {kBallSpeed, 0.f};
         } else {
-            m_Velocity = {-300.f, 0.f};
+            m_Velocity = {-kBallSpeed, 0.f};
         }
         Position = D2D1::Point2F(windowRect.right / 2.f, windowRect.bottom / 2.f);
     }
@@ -162,8 +175,16 @@ struct Ball final : GameObject {
     }
 
     void CheckCollision() {
-        auto paddlePlayer   = g_GameObjects["Player"];
-        auto paddleOpponent = g_GameObjects["Opponent"];
+        const auto paddlePlayer   = g_GameObjects["Player"];
+        const auto paddleOpponent = g_GameObjects["Opponent"];
+
+        if (Overlaps(BoundingBox, paddlePlayer->BoundingBox)) {
+            m_Velocity.x = -m_Velocity.x;
+        }
+
+        if (Overlaps(BoundingBox, paddleOpponent->BoundingBox)) {
+            m_Velocity.x = -m_Velocity.x;
+        }
     }
 
     void CheckOOB(const RECT& windowRect) {
