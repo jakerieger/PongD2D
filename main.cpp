@@ -14,8 +14,9 @@
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 
-static constexpr int kWindowWidth  = 1200;
-static constexpr int kWindowHeight = 900;
+static constexpr int kWindowWidth        = 1200;
+static constexpr int kWindowHeight       = 900;
+static constexpr bool kDrawBoundingBoxes = true;
 
 namespace Map {
     constexpr auto Values = std::ranges::views::values;
@@ -73,6 +74,15 @@ struct GameObject {
     virtual void Update(double dT)                     = 0;
     virtual void Draw(ID2D1RenderTarget* renderTarget) = 0;
     virtual ~GameObject()                              = default;
+
+    void DrawBoundingBox(ID2D1RenderTarget* renderTarget) const {
+        ID2D1SolidColorBrush* boundsBrush = nullptr;
+        CheckResult(
+          renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush));
+
+        renderTarget->DrawRectangle(Rect, boundsBrush, 1);
+        boundsBrush->Release();
+    }
 };
 
 static HWND g_Hwnd;
@@ -137,16 +147,6 @@ struct Ball final : GameObject {
 
         renderTarget->FillEllipse(D2D1::Ellipse(Position, Scale.x, Scale.y), brush);
         brush->Release();
-
-        // Draw bounding box
-        {
-            ID2D1SolidColorBrush* boundsBrush = nullptr;
-            CheckResult(
-              renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush));
-
-            renderTarget->DrawRectangle(Rect, boundsBrush, 1);
-            boundsBrush->Release();
-        }
     }
 
 private:
@@ -227,6 +227,10 @@ void Frame() {
         // Draw game stuff here
         for (const auto& go : g_GameObjects | Map::Values) {
             go->Draw(g_RenderTarget);
+
+            if constexpr (kDrawBoundingBoxes) {
+                go->DrawBoundingBox(g_RenderTarget);
+            }
         }
 
         CheckResult(g_RenderTarget->EndDraw());
