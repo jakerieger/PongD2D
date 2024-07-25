@@ -8,10 +8,9 @@
 #include <comdef.h>
 #include <locale>
 #include <utility>
+#include <thread>
 
 #include "res/resource.h"
-
-#include <thread>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
