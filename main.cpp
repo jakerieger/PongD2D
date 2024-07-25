@@ -65,22 +65,33 @@ struct GameState {
 static GameState g_GameState = {};
 
 struct GameObject {
-    D2D1_RECT_F Rect       = {};
-    D2D1_COLOR_F Color     = {};
-    D2D1_POINT_2F Position = {};
-    D2D1_POINT_2F Rotation = {};
-    D2D1_POINT_2F Scale    = {};
+    D2D1_RECT_F BoundingBox = {};
+    D2D1_COLOR_F Color      = {};
+    D2D1_POINT_2F Position  = {};
+    D2D1_POINT_2F Rotation  = {};
+    D2D1_POINT_2F Scale     = {};
 
+    virtual void Start()                               = 0;
     virtual void Update(double dT)                     = 0;
     virtual void Draw(ID2D1RenderTarget* renderTarget) = 0;
     virtual ~GameObject()                              = default;
+
+    void UpdateBoundingBox() {
+        const auto top    = Position.y - Scale.y;
+        const auto bottom = Position.y + Scale.y;
+        const auto left   = Position.x - Scale.x;
+        const auto right  = Position.x + Scale.x;
+
+        const auto boundingBox = D2D1::RectF(left, top, right, bottom);
+        BoundingBox            = boundingBox;
+    }
 
     void DrawBoundingBox(ID2D1RenderTarget* renderTarget) const {
         ID2D1SolidColorBrush* boundsBrush = nullptr;
         CheckResult(
           renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush));
 
-        renderTarget->DrawRectangle(Rect, boundsBrush, 1);
+        renderTarget->DrawRectangle(BoundingBox, boundsBrush, 1);
         boundsBrush->Release();
     }
 };
@@ -95,16 +106,6 @@ struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
         m_Velocity = {300.f, 0.f};
         Position   = D2D1::Point2F(windowRect.right / 2.f, windowRect.bottom / 2.f);
-    }
-
-    void UpdateBoundingBox() {
-        const auto top    = Position.y - Scale.y;
-        const auto bottom = Position.y + Scale.y;
-        const auto left   = Position.x - Scale.x;
-        const auto right  = Position.x + Scale.x;
-
-        const auto boundingBox = D2D1::RectF(left, top, right, bottom);
-        this->Rect             = boundingBox;
     }
 
     void Move(const float dT) {
@@ -131,6 +132,12 @@ struct Ball final : GameObject {
         }
     }
 
+    void Start() override {
+        RECT windowRect;
+        ::GetClientRect(g_Hwnd, &windowRect);
+        Reset(windowRect);
+    }
+
     void Update(const double dT) override {
         RECT windowRect;
         ::GetClientRect(g_Hwnd, &windowRect);
@@ -150,10 +157,12 @@ struct Ball final : GameObject {
     }
 
 private:
-    D2D1_POINT_2F m_Velocity = {300.f, 0.f};
+    D2D1_POINT_2F m_Velocity = {0.f, 0.f};
 };
 
 struct Paddle final : GameObject {
+    void Start() override {}
+
     void Update(double dT) override {}
 
     void Draw(ID2D1RenderTarget* renderTarget) override {}
@@ -210,6 +219,12 @@ void Shutdown() {
     if (g_Factory) {
         g_Factory->Release();
         g_Factory = nullptr;
+    }
+}
+
+void Start() {
+    for (const auto& go : g_GameObjects | Map::Values) {
+        go->Start();
     }
 }
 
@@ -354,6 +369,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Enter the main loop
     MSG msg = {};
     Timer::StartTimer();
+    Start();
 
     for (;;) {
         Update(Timer::GetDeltaTime());
