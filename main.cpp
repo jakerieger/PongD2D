@@ -12,6 +12,8 @@
 
 #include "res/resource.h"
 
+#include <format>
+
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 
@@ -63,9 +65,54 @@ static RECT GetWindowRect(HWND hwnd) {
     return rect;
 }
 
-#define scast static_cast
-#define dcast dynamic_cast
-#define rcast reinterpret_cast
+#define SCAST static_cast
+#define DCAST dynamic_cast
+#define RCAST reinterpret_cast
+#define CCAST const_cast
+#define CATCH_COM_EXCEPTION                                                                        \
+    try {                                                                                          \
+        CheckResult(hr);                                                                           \
+    } catch (ComError & err) {                                                                     \
+        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);                        \
+        if (g_Hwnd) {                                                                              \
+            ::PostQuitMessage(0);                                                                  \
+        } else {                                                                                   \
+            exit(1);                                                                               \
+        }                                                                                          \
+    }
+
+struct Vector2 {
+    float X = 0;
+    float Y = 0;
+
+    Vector2 operator-() const {
+        return {-X, -Y};
+    }
+
+    Vector2 operator*(const Vector2& rhs) const {
+        return {X * rhs.X, Y * rhs.Y};
+    }
+
+    Vector2 operator*(const float scalar) const {
+        return {X * scalar, Y * scalar};
+    }
+
+    static float Dot(const Vector2& lhs, const Vector2& rhs) {
+        return lhs.X * rhs.X + lhs.Y * rhs.Y;
+    }
+
+    static Vector2 Reflect(const Vector2& velocity, const Vector2& normal) {
+        const float dotProduct = Dot(velocity, normal);
+        Vector2 reflection;
+        reflection.X = velocity.X - 2 * dotProduct * normal.X;
+        reflection.Y = velocity.Y - 2 * dotProduct * normal.Y;
+        return reflection;
+    }
+
+    [[nodiscard]] D2D1_POINT_2F GetPoint() const {
+        return D2D1::Point2F(X, Y);
+    }
+};
 
 struct GameState {
     int PlayerScore   = 0;
@@ -115,9 +162,10 @@ struct InputListener {
 struct GameObject {
     D2D1_RECT_F BoundingBox = {};
     D2D1_COLOR_F Color      = {};
-    D2D1_POINT_2F Position  = {};
-    D2D1_POINT_2F Rotation  = {};
-    D2D1_POINT_2F Scale     = {};
+    Vector2 Position        = {};
+    Vector2 Rotation        = {};
+    Vector2 Size            = {};
+    Vector2 Velocity        = {};
 
     virtual void Start()                               = 0;
     virtual void Update(double dT)                     = 0;
@@ -127,10 +175,10 @@ struct GameObject {
     virtual void Reset() {}
 
     void UpdateBoundingBox() {
-        const auto top    = Position.y - Scale.y;
-        const auto bottom = Position.y + Scale.y;
-        const auto left   = Position.x - Scale.x;
-        const auto right  = Position.x + Scale.x;
+        const auto top    = Position.Y - Size.Y;
+        const auto bottom = Position.Y + Size.Y;
+        const auto left   = Position.X - Size.X;
+        const auto right  = Position.X + Size.X;
 
         const auto boundingBox = D2D1::RectF(left, top, right, bottom);
         BoundingBox            = boundingBox;
@@ -138,12 +186,9 @@ struct GameObject {
 
     void DrawBoundingBox(ID2D1RenderTarget* renderTarget) const {
         ID2D1SolidColorBrush* boundsBrush = nullptr;
-        try {
-            CheckResult(
-              renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush));
-        } catch (ComError& err) {
-            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-        }
+        const auto hr =
+          renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Red), &boundsBrush);
+        CATCH_COM_EXCEPTION;
 
         renderTarget->DrawRectangle(BoundingBox, boundsBrush, 1);
         boundsBrush->Release();
@@ -175,39 +220,41 @@ struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
         GameObject::Reset();
 
-        if (m_LastToScore == 0) {
-            m_Velocity = {kBallSpeed, 0.f};
+        if (m_LastToScore == 1) {
+            // TODO: Randomize Y velocity
+            Velocity = {kBallSpeed, 0.f};
         } else {
-            m_Velocity = {-kBallSpeed, 0.f};
+            Velocity = {-kBallSpeed, 0.f};
         }
-        Position = D2D1::Point2F(windowRect.right / 2.f, windowRect.bottom / 2.f);
+        Position = {windowRect.right / 2.f, windowRect.bottom / 2.f};
     }
 
     void Move(const float dT) {
-        Position.x += m_Velocity.x * dT;
-        Position.y += m_Velocity.y * dT;
+        Position.X += Velocity.X * dT;
+        Position.Y += Velocity.Y * dT;
     }
 
     void CheckCollision() {
         const auto paddlePlayer   = g_GameObjects["Player"];
         const auto paddleOpponent = g_GameObjects["Opponent"];
 
+        // TODO: Implement calculations for reflecting ball off paddle correctly
         if (Overlaps(BoundingBox, paddlePlayer->BoundingBox)) {
-            m_Velocity.x = -m_Velocity.x;
+            Velocity = -Velocity;
         }
 
         if (Overlaps(BoundingBox, paddleOpponent->BoundingBox)) {
-            m_Velocity.x = -m_Velocity.x;
+            Velocity = -Velocity;
         }
     }
 
     void CheckOOB(const RECT& windowRect) {
-        if (Position.x < 0.0) {
+        if (Position.X < 0.0) {
             // Score and reset ball
             g_GameState.OpponentScore++;
             m_LastToScore = 0;
             Reset(windowRect);
-        } else if (Position.x > scast<float>(windowRect.right)) {
+        } else if (Position.X > SCAST<float>(windowRect.right)) {
             // Score opponent and reset ball
             g_GameState.PlayerScore++;
             m_LastToScore = 1;
@@ -220,7 +267,7 @@ struct Ball final : GameObject {
     }
 
     void Update(const double dT) override {
-        Move(scast<float>(dT));
+        Move(SCAST<float>(dT));
         UpdateBoundingBox();
         CheckCollision();
         CheckOOB(GetWindowRect(g_Hwnd));
@@ -228,19 +275,15 @@ struct Ball final : GameObject {
 
     void Draw(ID2D1RenderTarget* renderTarget) override {
         ID2D1SolidColorBrush* brush = nullptr;
-        try {
-            CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
-        } catch (ComError& err) {
-            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-        }
+        const auto hr               = renderTarget->CreateSolidColorBrush(Color, &brush);
+        CATCH_COM_EXCEPTION;
 
-        renderTarget->FillEllipse(D2D1::Ellipse(Position, Scale.x, Scale.y), brush);
+        renderTarget->FillEllipse(D2D1::Ellipse(Position.GetPoint(), Size.X, Size.Y), brush);
         brush->Release();
     }
 
 private:
-    D2D1_POINT_2F m_Velocity = {0.f, 0.f};
-    int m_LastToScore        = 0;
+    int m_LastToScore = 0;
 };
 
 struct Paddle final : GameObject,
@@ -264,11 +307,9 @@ struct Paddle final : GameObject,
 
     void Draw(ID2D1RenderTarget* renderTarget) override {
         ID2D1SolidColorBrush* brush = nullptr;
-        try {
-            CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
-        } catch (ComError& err) {
-            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-        }
+        const auto hr               = renderTarget->CreateSolidColorBrush(Color, &brush);
+        CATCH_COM_EXCEPTION;
+
         renderTarget->FillRectangle(BoundingBox, brush);
         brush->Release();
     }
@@ -276,14 +317,58 @@ struct Paddle final : GameObject,
     void OnKey(const KeyEvent event) override {
         // TODO: Bug where arrow key and alpha key pressed together double paddle speed
         if (event.KeyCode == VK_UP || event.KeyCode == 'W') {
-            Position.y -= 10.f;
+            Position.Y -= 10.f;
+            Velocity.Y = -100.f;
         } else if (event.KeyCode == VK_DOWN || event.KeyCode == 'S') {
-            Position.y += 10.f;
+            Position.Y += 10.f;
+            Velocity.Y = 100.f;
         }
     }
 
 private:
     bool m_IsAI;
+};
+
+struct GameText final : GameObject {
+    void Start() override {
+        auto hr = g_DWriteFactory->CreateTextFormat(L"Unispace",
+                                                    nullptr,
+                                                    DWRITE_FONT_WEIGHT_BOLD,
+                                                    DWRITE_FONT_STYLE_NORMAL,
+                                                    DWRITE_FONT_STRETCH_NORMAL,
+                                                    40.f,
+                                                    L"en-us",
+                                                    &m_TextFormat);
+        CATCH_COM_EXCEPTION;
+
+        hr = m_TextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        CATCH_COM_EXCEPTION;
+
+        hr = m_TextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        CATCH_COM_EXCEPTION;
+    }
+
+    void Update(double dT) override {
+        const auto fmt = std::format("{} | {}", g_GameState.PlayerScore, g_GameState.OpponentScore);
+        ANSIToWide(fmt, m_Text);
+        UpdateBoundingBox();
+    }
+
+    void Draw(ID2D1RenderTarget* renderTarget) override {
+        ID2D1SolidColorBrush* brush = nullptr;
+        const auto hr               = renderTarget->CreateSolidColorBrush(Color, &brush);
+        CATCH_COM_EXCEPTION;
+
+        renderTarget->DrawTextA(m_Text.c_str(),
+                                wcslen(m_Text.c_str()),
+                                m_TextFormat,
+                                D2D1::RectF(0, 0, Position.X, Position.Y),
+                                brush);
+    }
+
+private:
+    IDWriteTextFormat* m_TextFormat = nullptr;
+    std::wstring m_Text;
 };
 
 void InputDispatcher() {
@@ -303,11 +388,7 @@ void InputDispatcher() {
 
 void Initialize() {
     auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_Factory);
-    try {
-        CheckResult(hr);
-    } catch (ComError& err) {
-        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-    }
+    CATCH_COM_EXCEPTION;
 
     RECT rc;
     GetClientRect(g_Hwnd, &rc);
@@ -315,46 +396,48 @@ void Initialize() {
       D2D1::RenderTargetProperties(),
       D2D1::HwndRenderTargetProperties(g_Hwnd, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top)),
       &g_RenderTarget);
-    try {
-        CheckResult(hr);
-    } catch (ComError& err) {
-        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-    }
+    CATCH_COM_EXCEPTION;
 
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
                              __uuidof(IDWriteFactory),
-                             rcast<IUnknown**>(&g_DWriteFactory));
-    try {
-        CheckResult(hr);
-    } catch (ComError& err) {
-        MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-    }
+                             RCAST<IUnknown**>(&g_DWriteFactory));
+    CATCH_COM_EXCEPTION;
+
+    // Load UI font
+    {}
 
     g_InputDispatcherThread = std::thread(InputDispatcher);
 
-    {  // Initialize the game objects
+    {
+        // Initialize the game objects
         const auto ball = new Ball;
         ball->Color     = D2D1::ColorF(D2D1::ColorF::White);
-        ball->Position =
-          D2D1::Point2F(scast<float>(rc.right - rc.left) / 2, scast<float>(rc.bottom - rc.top) / 2);
-        ball->Scale = D2D1::Point2F(16, 16);
+        ball->Position  = {SCAST<float>(rc.right - rc.left) / 2,
+                           SCAST<float>(rc.bottom - rc.top) / 2};
+        ball->Size      = {16, 16};
 
         const auto paddlePlayer = new Paddle(false);
         paddlePlayer->Color     = D2D1::ColorF(D2D1::ColorF::CornflowerBlue);
-        paddlePlayer->Position =
-          D2D1::Point2F(scast<float>(rc.left) + 100, scast<float>(rc.bottom - rc.top) / 2);
-        paddlePlayer->Scale = D2D1::Point2F(16, 100);
+        paddlePlayer->Position  = {SCAST<float>(rc.left) + 100,
+                                   SCAST<float>(rc.bottom - rc.top) / 2};
+        paddlePlayer->Size      = {16, 100};
 
         const auto paddleOpponent = new Paddle(true);
         paddleOpponent->Color     = D2D1::ColorF(0xED64A6);
-        paddleOpponent->Position =
-          D2D1::Point2F(scast<float>(rc.right) - 100, scast<float>(rc.bottom - rc.top) / 2);
-        paddleOpponent->Scale = D2D1::Point2F(16, 100);
+        paddleOpponent->Position  = {SCAST<float>(rc.right) - 100,
+                                     SCAST<float>(rc.bottom - rc.top) / 2};
+        paddleOpponent->Size      = {16, 100};
+
+        const auto gameText = new GameText;
+        gameText->Position  = {SCAST<float>(rc.right), 140.f};
+        gameText->Size      = {32, 0};  // 16pt font, Y value not needed
+        gameText->Color     = D2D1::ColorF(D2D1::ColorF::White);
 
         g_InputListeners.push_back(paddlePlayer);
         g_GameObjects["Player"]   = paddlePlayer;
         g_GameObjects["Opponent"] = paddleOpponent;
         g_GameObjects["Ball"]     = ball;
+        g_GameObjects["GameText"] = gameText;
     }
 }
 
@@ -421,21 +504,15 @@ void Frame() {
             }
         }
 
-        try {
-            CheckResult(g_RenderTarget->EndDraw());
-        } catch (ComError& err) {
-            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-        }
+        const auto hr = g_RenderTarget->EndDraw();
+        CATCH_COM_EXCEPTION;
     }
 }
 
 void OnResize(const int w, const int h) {
     if (g_RenderTarget) {
-        try {
-            CheckResult(g_RenderTarget->Resize(D2D1::SizeU(w, h)));
-        } catch (ComError& err) {
-            MessageBoxA(g_Hwnd, err.what(), "COM Error", MB_OK | MB_ICONERROR);
-        }
+        const auto hr = g_RenderTarget->Resize(D2D1::SizeU(w, h));
+        CATCH_COM_EXCEPTION;
     }
 }
 
@@ -480,10 +557,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         }
             return 0;
         case WM_KEYDOWN:
-            OnKeyDown(scast<int>(wParam));
+            OnKeyDown(SCAST<int>(wParam));
             return 0;
         case WM_KEYUP:
-            OnKeyUp(scast<int>(wParam));
+            OnKeyUp(SCAST<int>(wParam));
             return 0;
         case WM_MOUSEMOVE:
             OnMouseMove(LOWORD(lParam), HIWORD(lParam));
@@ -521,7 +598,7 @@ namespace Timer {
         QueryPerformanceCounter(&currentTime);
         const LONGLONG elapsed = currentTime.QuadPart - g_LastTime.QuadPart;
         g_LastTime             = currentTime;
-        return scast<double>(elapsed) / scast<double>(g_Frequency.QuadPart);
+        return SCAST<double>(elapsed) / SCAST<double>(g_Frequency.QuadPart);
     }
 }  // namespace Timer
 
@@ -589,5 +666,5 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_IsRunning = false;
     Shutdown();
 
-    return scast<int>(msg.wParam);
+    return SCAST<int>(msg.wParam);
 }
