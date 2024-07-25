@@ -17,12 +17,10 @@
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 
-static constexpr int kWindowWidth        = 1200;
-static constexpr int kWindowHeight       = 900;
 static constexpr bool kDrawBoundingBoxes = false;
-static constexpr float kBallSpeed        = 500.f;
 
-static bool g_IsRunning = false;
+static float g_InitBallSpeed = 10.f;
+static bool g_IsRunning      = false;
 static HWND g_Hwnd;
 
 namespace Map {
@@ -172,7 +170,8 @@ struct GameObject {
     virtual void Draw(ID2D1RenderTarget* renderTarget) = 0;
     virtual ~GameObject()                              = default;
 
-    virtual void Reset() {}
+    virtual void Reset() {};
+    virtual void FixedUpdate() {};
 
     void UpdateBoundingBox() {
         const auto top    = Position.Y - Size.Y;
@@ -203,6 +202,9 @@ static std::unordered_map<std::string, GameObject*> g_GameObjects;
 static std::vector<InputListener*> g_InputListeners;
 static std::unordered_map<int, KeyState> g_KeyStates;
 std::thread g_InputDispatcherThread;
+std::thread g_FixedUpdateThread;
+
+void FixedUpdate();
 
 bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
     if (rectA.right <= rectB.left || rectB.right <= rectA.left) {
@@ -219,19 +221,20 @@ bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
         GameObject::Reset();
+        m_Speed = g_InitBallSpeed;
 
         if (m_LastToScore == 1) {
             // TODO: Randomize Y velocity
-            Velocity = {kBallSpeed, 0.f};
+            Velocity = {m_Speed, 0.f};
         } else {
-            Velocity = {-kBallSpeed, 0.f};
+            Velocity = {-m_Speed, 0.f};
         }
         Position = {windowRect.right / 2.f, windowRect.bottom / 2.f};
     }
 
-    void Move(const float dT) {
-        Position.X += Velocity.X * dT;
-        Position.Y += Velocity.Y * dT;
+    void Move() {
+        Position.X += Velocity.X;
+        Position.Y += Velocity.Y;
     }
 
     void CheckCollision() {
@@ -239,12 +242,12 @@ struct Ball final : GameObject {
         const auto paddleOpponent = g_GameObjects["Opponent"];
 
         // TODO: Implement calculations for reflecting ball off paddle correctly
-        if (Overlaps(BoundingBox, paddlePlayer->BoundingBox)) {
+        if (Overlaps(BoundingBox, paddlePlayer->BoundingBox) ||
+            Overlaps(BoundingBox, paddleOpponent->BoundingBox)) {
             Velocity = -Velocity;
-        }
-
-        if (Overlaps(BoundingBox, paddleOpponent->BoundingBox)) {
-            Velocity = -Velocity;
+            // increase ball speed
+            Velocity.X *= 1.05;
+            Velocity.Y *= 1.05;
         }
     }
 
@@ -266,12 +269,14 @@ struct Ball final : GameObject {
         Reset(GetWindowRect(g_Hwnd));
     }
 
-    void Update(const double dT) override {
-        Move(SCAST<float>(dT));
+    void FixedUpdate() override {
         UpdateBoundingBox();
         CheckCollision();
         CheckOOB(GetWindowRect(g_Hwnd));
+        Move();
     }
+
+    void Update(const double dT) override {}
 
     void Draw(ID2D1RenderTarget* renderTarget) override {
         ID2D1SolidColorBrush* brush = nullptr;
@@ -284,6 +289,7 @@ struct Ball final : GameObject {
 
 private:
     int m_LastToScore = 0;
+    float m_Speed     = g_InitBallSpeed;
 };
 
 struct Paddle final : GameObject,
@@ -407,6 +413,7 @@ void Initialize() {
     {}
 
     g_InputDispatcherThread = std::thread(InputDispatcher);
+    g_FixedUpdateThread     = std::thread(FixedUpdate);
 
     {
         // Initialize the game objects
@@ -460,11 +467,22 @@ void Shutdown() {
     }
 
     g_InputDispatcherThread.join();
+    g_FixedUpdateThread.join();
 }
 
 void Start() {
     for (const auto& go : g_GameObjects | Map::Values) {
         go->Start();
+    }
+}
+
+void FixedUpdate() {
+    while (g_IsRunning) {
+        for (const auto& go : g_GameObjects | Map::Values) {
+            go->FixedUpdate();
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
@@ -621,18 +639,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     const int scrWidth  = ::GetSystemMetrics(SM_CXSCREEN);
     const int scrHeight = ::GetSystemMetrics(SM_CYSCREEN);
-    const int posX      = (scrWidth - kWindowWidth) / 2;
-    const int posY      = (scrHeight - kWindowHeight) / 2;
 
     // Create the window
     g_Hwnd = ::CreateWindowExA(0,
                                wc.lpszClassName,
                                "PongD2D",
-                               WS_SYSMENU | WS_CAPTION | WS_MINIMIZEBOX,
-                               posX,
-                               posY,
-                               kWindowWidth,
-                               kWindowHeight,
+                               WS_POPUP,
+                               0,
+                               0,
+                               scrWidth,
+                               scrHeight,
                                nullptr,
                                nullptr,
                                hInstance,
