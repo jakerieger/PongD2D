@@ -16,7 +16,7 @@
 
 static constexpr int kWindowWidth        = 1200;
 static constexpr int kWindowHeight       = 900;
-static constexpr bool kDrawBoundingBoxes = true;
+static constexpr bool kDrawBoundingBoxes = false;
 
 namespace Map {
     constexpr auto Values = std::ranges::views::values;
@@ -114,8 +114,12 @@ static std::vector<InputListener*> g_InputListeners;
 
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
-        m_Velocity = {300.f, 0.f};
-        Position   = D2D1::Point2F(windowRect.right / 2.f, windowRect.bottom / 2.f);
+        if (m_LastToScore == 0) {
+            m_Velocity = {300.f, 0.f};
+        } else {
+            m_Velocity = {-300.f, 0.f};
+        }
+        Position = D2D1::Point2F(windowRect.right / 2.f, windowRect.bottom / 2.f);
     }
 
     void Move(const float dT) {
@@ -132,13 +136,13 @@ struct Ball final : GameObject {
         if (Position.x < 0.0) {
             // Score and reset ball
             g_GameState.OpponentScore++;
-            // Reset(windowRect);
-            m_Velocity.x = -m_Velocity.x;
+            m_LastToScore = 0;
+            Reset(windowRect);
         } else if (Position.x > scast<float>(windowRect.right)) {
             // Score opponent and reset ball
             g_GameState.PlayerScore++;
-            // Reset(windowRect);
-            m_Velocity.x = -m_Velocity.x;
+            m_LastToScore = 1;
+            Reset(windowRect);
         }
     }
 
@@ -168,6 +172,7 @@ struct Ball final : GameObject {
 
 private:
     D2D1_POINT_2F m_Velocity = {0.f, 0.f};
+    int m_LastToScore        = 0;
 };
 
 struct Paddle final : GameObject,
@@ -185,9 +190,16 @@ struct Paddle final : GameObject,
         if (m_IsAI) {
             MoveAI();
         }
+
+        UpdateBoundingBox();
     }
 
-    void Draw(ID2D1RenderTarget* renderTarget) override {}
+    void Draw(ID2D1RenderTarget* renderTarget) override {
+        ID2D1SolidColorBrush* brush = nullptr;
+        CheckResult(renderTarget->CreateSolidColorBrush(Color, &brush));
+        renderTarget->FillRectangle(BoundingBox, brush);
+        brush->Release();
+    }
 
     void OnKeyDown(int keyCode) override {}
 
@@ -222,16 +234,16 @@ void Initialize() {
         ball->Scale = D2D1::Point2F(16, 16);
 
         const auto paddlePlayer = new Paddle(false);
-        paddlePlayer->Color     = D2D1::ColorF(D2D1::ColorF::White);
+        paddlePlayer->Color     = D2D1::ColorF(D2D1::ColorF::CornflowerBlue);
         paddlePlayer->Position =
           D2D1::Point2F(scast<float>(rc.left) + 100, scast<float>(rc.bottom - rc.top) / 2);
-        paddlePlayer->Scale = D2D1::Point2F(16, 200);
+        paddlePlayer->Scale = D2D1::Point2F(16, 100);
 
         const auto paddleOpponent = new Paddle(true);
         paddleOpponent->Color     = D2D1::ColorF(D2D1::ColorF::White);
         paddleOpponent->Position =
           D2D1::Point2F(scast<float>(rc.right) - 100, scast<float>(rc.bottom - rc.top) / 2);
-        paddleOpponent->Scale = D2D1::Point2F(16, 200);
+        paddleOpponent->Scale = D2D1::Point2F(16, 100);
 
         g_InputListeners.push_back(paddlePlayer);
         g_GameObjects["Player"]   = paddlePlayer;
