@@ -1,7 +1,18 @@
+/*
+ __   __   ___  __   __   __   __   ___  __   __   __   __
+|__) |__) |__  |__) |__) /  \ /  ` |__  /__` /__` /  \ |__)
+|    |  \ |___ |    |  \ \__/ \__, |___ .__/ .__/ \__/ |  \
+ */
 #include <Windows.h>
-#include <codecvt>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <xaudio2.h>
+
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "xaudio2")
+
+#include <codecvt>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -9,13 +20,9 @@
 #include <locale>
 #include <utility>
 #include <thread>
-
-#include "res/resource.h"
-
 #include <format>
 
-#pragma comment(lib, "d2d1.lib")
-#pragma comment(lib, "dwrite.lib")
+#include "res/resource.h"
 
 static constexpr bool kDrawBoundingBoxes = false;
 
@@ -23,20 +30,15 @@ static float g_InitBallSpeed = 10.f;
 static bool g_IsRunning      = false;
 static HWND g_Hwnd;
 
+/*
+___      __   ___     __   ___  ___  __
+ |  \ / |__) |__     |  \ |__  |__  /__`
+ |   |  |    |___    |__/ |___ |    .__/
+*/
 namespace Map {
     constexpr auto Values = std::ranges::views::values;
     constexpr auto Keys   = std::ranges::views::keys;
 }  // namespace Map
-
-inline void WideToANSI(const std::wstring& value, std::string& converted) {
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-    converted = converter.to_bytes(value);
-}
-
-inline void ANSIToWide(const std::string& value, std::wstring& converted) {
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-    converted = converter.from_bytes(value);
-}
 
 class ComError final : public std::exception {
 public:
@@ -204,7 +206,23 @@ static std::unordered_map<int, KeyState> g_KeyStates;
 std::thread g_InputDispatcherThread;
 std::thread g_FixedUpdateThread;
 
+/*
+      __        __   __   __
+|__| |__  |    |__) |__  |__) /__`
+|  | |___ |___ |    |___ |  \ .__/
+*/
+
 void FixedUpdate();
+
+inline void WideToANSI(const std::wstring& value, std::string& converted) {
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    converted = converter.to_bytes(value);
+}
+
+inline void ANSIToWide(const std::string& value, std::wstring& converted) {
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    converted = converter.from_bytes(value);
+}
 
 bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
     if (rectA.right <= rectB.left || rectB.right <= rectA.left) {
@@ -217,6 +235,12 @@ bool Overlaps(const D2D1_RECT_F& rectA, const D2D1_RECT_F& rectB) {
 
     return true;
 }
+
+/*
+ __              ___     __   __        ___  __  ___     __             __   __   ___  __
+/ _`  /\   |\/| |__     /  \ |__)    | |__  /  `  |     /  ` |     /\  /__` /__` |__  /__`
+\__> /~~\  |  | |___    \__/ |__) \__/ |___ \__,  |     \__, |___ /~~\ .__/ .__/ |___ .__/
+*/
 
 struct Ball final : GameObject {
     void Reset(const RECT& windowRect) {
@@ -376,6 +400,12 @@ private:
     IDWriteTextFormat* m_TextFormat = nullptr;
     std::wstring m_Text;
 };
+
+/*
+        ___  ___  __       __        ___           ___ ___       __   __   __   __
+|    | |__  |__  /  ` \ / /  ` |    |__      |\/| |__   |  |__| |__) /  \ |  \ /__`
+|___ | |    |___ \__,  |  \__, |___ |___     |  | |___  |  |  | |    \__/ |__/ .__/
+*/
 
 void InputDispatcher() {
     while (g_IsRunning) {
@@ -620,6 +650,10 @@ namespace Timer {
     }
 }  // namespace Timer
 
+/*
+|\/|  /\  | |\ |
+|  | /~~\ | | \|
+*/
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     HICON appIcon = ::LoadIcon(hInstance, MAKEINTRESOURCE(APPICON));
 
