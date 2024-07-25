@@ -52,7 +52,12 @@ private:
 static void CheckResult(const HRESULT hr) {
     if (FAILED(hr)) {
         const _com_error err(hr);
+#ifndef NDEBUG
         throw ComError(err.ErrorMessage());
+#else
+        MessageBoxA(g_Hwnd, err.ErrorMessage(), "Windows Error", MB_OK);
+        exit(1);
+#endif
     }
 }
 
