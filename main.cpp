@@ -1,12 +1,52 @@
 #include <Windows.h>
+#include <codecvt>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <ranges>
 #include <string>
 #include <unordered_map>
-#include <vector>
+#include <comdef.h>
+#include <locale>
+#include <utility>
+
+#include "res/resource.h"
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
+
+namespace Map {
+    constexpr auto Values = std::ranges::views::values;
+    constexpr auto Keys = std::ranges::views::keys;
+}
+
+inline void WideToANSI(const std::wstring& value, std::string& converted) {
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    converted = converter.to_bytes(value);
+}
+
+inline void ANSIToWide(const std::string& value, std::wstring& converted) {
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    converted = converter.from_bytes(value);
+}
+
+class ComError final : public std::exception {
+public:
+    explicit ComError(std::string  msg) : message(std::move(msg)) {}
+
+    [[nodiscard]] const char* what() const noexcept override {
+        return message.c_str();
+    }
+
+private:
+    std::string message;
+};
+
+static void CheckResult(const HRESULT hr) {
+    if (FAILED(hr)) {
+        const _com_error err(hr);
+        throw ComError(err.ErrorMessage());
+    }
+}
 
 #define scast static_cast
 #define dcast dynamic_cast
@@ -43,10 +83,7 @@ struct Paddle final : GameObject {
 
 void Initialize() {
     auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_Factory);
-    if (FAILED(hr)) {
-        MessageBox(nullptr, "D2D1CreateFactory failed!", "Error", MB_OK);
-        return;
-    }
+    CheckResult(hr);
 
     RECT rc;
     GetClientRect(g_Hwnd, &rc);
@@ -54,9 +91,7 @@ void Initialize() {
       D2D1::RenderTargetProperties(),
       D2D1::HwndRenderTargetProperties(g_Hwnd, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top)),
       &g_RenderTarget);
-    if (FAILED(hr)) {
-        MessageBox(nullptr, "D2D1CreateFactory failed!", "Error", MB_OK);
-    }
+    CheckResult(hr);
 }
 
 void Shutdown() {
@@ -72,7 +107,7 @@ void Shutdown() {
 }
 
 void Update() {
-    for (const auto& go : g_GameObjects) {
+    for (const auto& go : g_GameObjects | Map::Values) {
         go->Update();
     }
 }
@@ -83,20 +118,17 @@ void Frame() {
         g_RenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 
         // Draw game stuff here
-        for (const auto& go : g_GameObjects) {
+        for (const auto& go : g_GameObjects | Map::Values) {
             go->Draw(g_RenderTarget);
         }
 
-        if (const auto hr = g_RenderTarget->EndDraw(); FAILED(hr)) {
-            MessageBox(nullptr, "EndDraw failed!", "Error", MB_OK);
-            return;
-        }
+        CheckResult(g_RenderTarget->EndDraw());
     }
 }
 
 void OnResize(const int w, const int h) {
     if (g_RenderTarget) {
-        g_RenderTarget->Resize(D2D1::SizeU(w, h));
+        CheckResult(g_RenderTarget->Resize(D2D1::SizeU(w, h)));
     }
 }
 
@@ -150,6 +182,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    HICON appIcon = ::LoadIcon(hInstance, MAKEINTRESOURCE(APPICON));
+
     // Initialize the window class
     WNDCLASSEXA wc;
     ZeroMemory(&wc, sizeof(WNDCLASSEXA));
@@ -157,6 +191,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.style         = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
+    wc.hIcon         = appIcon;
+    wc.hIconSm        = wc.hIcon;
     wc.hCursor       = ::LoadCursor(nullptr, IDC_ARROW);
     wc.lpszClassName = "PongWindowClass";
 
@@ -165,7 +201,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Create the window
     g_Hwnd = ::CreateWindowExA(0,
                                wc.lpszClassName,
-                               "PongC++",
+                               "PongD2D",
                                WS_OVERLAPPEDWINDOW,
                                300,
                                300,
